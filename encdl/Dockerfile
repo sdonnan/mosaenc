@@ -5,12 +5,27 @@ run apt update \
     && apt install -y \
         build-essential \
         curl \
-        gdal-bin \
+        cmake \
         libsqlite3-dev \
         protobuf-compiler \
+        libproj-dev \
+        python3-dev \
+        swig \
         unzip \
         zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
+
+# install a new gdal
+run curl -LJo /gdal.tar.gz https://github.com/OSGeo/gdal/releases/download/v3.8.4/gdal-3.8.4.tar.gz \
+    && tar -xf /gdal.tar.gz \
+    && cd gdal-3.8.4 \
+    && mkdir build \
+    && cd build \
+    && cmake -DCMAKE_BUILD_TYPE=Release .. \
+    && make install -j \
+    && cd \
+    && rm gdal-3.8.4 \
+    && rm /gdal.tar.gz
 
 # install tippecanoe
 run curl -LJo /tippecanoe.zip https://github.com/mapbox/tippecanoe/archive/refs/heads/master.zip \

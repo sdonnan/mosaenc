@@ -7,6 +7,7 @@ from enum import Enum, auto
 import concurrent.futures
 import logging
 import subprocess
+from osgeo import ogr
 
 '''
 MB tile builder
@@ -17,22 +18,18 @@ To Do:
 
 LOG = logging.getLogger(__name__)
 ENC_ALL_URL = 'https://charts.noaa.gov/ENCs/All_ENCs.zip'
-S57_DAL_OPTIONS = {
-    'RETURN_PRIMITIVES': 'ON',
-    'RETURN_LINKAGES': 'ON',
-    'LNAM_REFS': 'ON',
-    'SPLIT_MULTIPOINT': 'ON',
-    'ADD_SOUNDG_DEPTH': 'ON',
-}
+OGR_S57_OPTIONS="RETURN_PRIMITIVES=ON,RETURN_LINKAGES=ON,LNAM_REFS=ON,SPLIT_MULTIPOINT=ON,ADD_SOUNDG_DEPTH=ON"
 
 BAND2ZOOM = {
-    1: (0,1),
-    2: (2,6),
-    3: (7,11),
-    4: (12,13),
-    5: (14,15),
-    6: (16,18),
+    1: (0, 3),
+    2: (0, 8),
+    3: (0, 12),
+    4: (0, 14),
+    5: (0, 16),
+    6: (0, 18),
 }
+
+MAXZ = 18
 
 class DataType:
     Point = auto()
@@ -40,28 +37,59 @@ class DataType:
     Polygon = auto()
 
     def as_gdal(dt):
-        if dt == DataType.Point: return 'POINT25D'
-        if dt == DataType.Line: return 'MULTILINESTRING'
-        if dt == DataType.Polygon: return 'MULTIPOLYGON'
+        if dt == DataType.Point:
+            return 'POINT25D'
+        if dt == DataType.Line:
+            return 'MULTILINESTRING'
+        if dt == DataType.Polygon:
+            return 'MULTIPOLYGON'
         raise NotImplementedError(f'Unknown type {dt}')
 
+
+class Enc:
+
+    def __init__(self, fname: Path):
+        self.fname: Path = fname
+        self.band: int(fname.stem[2])
+        drv = ogr.GetDriverByName('S57')
+        ds = drv.Open(str(self.fname))
+        self.bb = ds.GetLayer(1).GetExtent()
+
+    def within(self, obj):
+        if self.bb is None:
+            return True
+        elif isinstance(obj, Enc):
+            env = obj.bb
+        else:
+            env = obj
+        return \
+            env[0] < self.bb[0] and \
+            env[1] > self.bb[1] and \
+            env[2] < self.bb[2] and \
+            env[3] > self.bb[3]
+
+
 CFG = {
-    'polygons': {
+    'layers': {
         'LNDARE': {
-            'color': (1.0, 0.906, 0.671, 1.0)
-        }
-    },
-    'lines': {
-        'COALNE': {
-            'color': (0.459, 0.329, 0.0, 1.0)
+            'type': DataType.Polygon
         },
+#        'SEAARE': {
+#            'type': DataType.Polygon
+#        },
+#        'COALNE': {
+#            'type': DataType.Line
+#        },
         'DEPCNT': {
-            'color': (0.047, 0.0, 0.561, 1.0)
+            'type': DataType.Line
+        },
+        'SOUNDG': {
+            'type': DataType.Point
         },
     },
-    'background': (0.843, 0.827, 1.0, 1.0),
-    'soundings': True,
+    'background': (0.843, 0.827, 1.0, 1.0)
 }
+
 
 def get_enc(work_dir: Path):
     '''Download the ENC files and decompress them in the working directory'''
@@ -96,7 +124,8 @@ def get_enc(work_dir: Path):
             LOG.error(f'Failed to extract zip: {exception}')
             raise (exception)
 
-def make_dbs(work_dir: Path, jobs=1):
+
+def make_dbs(work_dir: Path, bb: List[float], jobs=1):
     work_dir = Path(work_dir)
     out_dir = Path(work_dir, 'dbs')
     enc_dir = Path(work_dir, 'ENC_ROOT')
@@ -106,15 +135,21 @@ def make_dbs(work_dir: Path, jobs=1):
     # find dirs to coallesce
     for entry in enc_dir.iterdir():
         if entry.is_dir():
-            key = (entry.stem[2], entry.stem[3:5])
+            key = (entry.stem[2], 'US')  # entry.stem[3:5])
             output_dbs.setdefault(key, list()).append(entry)
     with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as exec:
         process_files = dict()
         for out_stem, directories in output_dbs.items():
-            directories.sort()
-            outf = Path(out_dir, out_stem[1] + out_stem[0] + '.db')
-            future = exec.submit(process_enc_dirs, directories, outf)
-            process_files[future] = outf
+            infiles = list(filter(
+                lambda x: Enc(x).within(bb),
+                [Path(source, source.stem + '.000') for source in directories],
+            ))
+            if not infiles: continue
+            for infile in infiles:
+                for layer, lconf in CFG['layers'].items():
+                    outf = Path(out_dir, f'{infile.stem}_{layer}.geojson')
+                    future = exec.submit(process_encs, infile, outf, lconf['type'], layer)
+                    process_files[future] = outf
     for future in concurrent.futures.as_completed(process_files):
         try:
             future.result()
@@ -125,75 +160,78 @@ def make_dbs(work_dir: Path, jobs=1):
 
     return process_files
 
-def process_enc_dirs(directories: List[Path], outf: Path):
-    for source in directories:
-        inf = Path(source, source.stem + '.000')
-        export_enc(inf, outf, CFG.get('polygons', []).keys(), DataType.Polygon)
-        export_enc(inf, outf, CFG.get('lines', []).keys(), DataType.Line)
-        if CFG.get('soundings', True):
-            export_enc(inf, outf, ['SOUNDG'], DataType.Point)
 
-def export_enc(infile: Path, outfile: Path, layers: List[str], content_type: DataType):
+def process_encs(infile: Path, outfile: Path, dtype: DataType, layer: str):
 
     LOG.debug(f'{infile} -> {outfile}')
-    band = int(infile.stem[2])
+    
     proc = subprocess.run([
         'ogr2ogr',
-        '-append' if outfile.exists() else '-overwrite',
-        '-mo',
-        f'band={band}',
-        '-nlt',
-        f'{DataType.as_gdal(content_type)}',
+        '-nlt', 
+        DataType.as_gdal(dtype),
         '-skipfailures',
         '-f',
-        'sqlite',
+        'geojson',
         outfile,
         infile,
-        *layers
+        layer
     ], 
-    env = S57_DAL_OPTIONS,
+    env = {'OGR_S57_OPTIONS': OGR_S57_OPTIONS},
     capture_output = True)
+    #proc = subprocess.run([
+    #    'ogrmerge.py',
+    #    '-overwrite_ds',
+    #    '-f',
+    #    'sqlite',
+    #    '-o',
+    #    outfile,
+    #    *infiles,
+    #],
+    #    env=S57_DAL_OPTIONS,
+    #    capture_output=True)
 
     if proc.returncode != 0:
-        emsg = proc.stderr.decode()
-        msg = f'Failed to generated DB. {emsg}'
+        emsg = proc.stdout.decode()
+        msg = f'Failed to generate DB. {emsg}'
         LOG.error(msg)
+
 
 def process_dbs(work_dir: Path, jobs=1):
 
     work_dir = Path(work_dir)
     out_dir = Path(work_dir, 'mbtiles')
     dbs_dir = Path(work_dir, 'dbs')
-    outfiles = set()
-    # build geojson for tippecanoe input
+    if not out_dir.is_dir():
+        out_dir.mkdir()
+    bandfiles = dict()
+    # build mbtiles
     with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as exec:
         process_files = dict()
-        for db in dbs_dir.iterdir():
-            if db.is_file() and db.suffix == '.db':
-                # TODO don't hardcode this
-                outfiles.add(db.stem[:4])
-                for layer in ('LNDARE', 'COALNE', 'DEPCNT'):
-                    outf = Path(out_dir, f'{db.stem}_{layer}.geojson')
-                    if outf.exists(): outf.unlink()
-                    future = exec.submit(process_db, db, outf, layer)
-                    process_files[future] = outf
+        for layer, lconf in CFG['layers'].items():
+            for band in range(9,0,-1):
+                infiles = list()
+                outf = Path(out_dir, f'BAND{band}_{layer}.mbtiles')
+                for file in dbs_dir.glob(f'US{band}*{layer}.geojson'):
+                    infiles.append(file)
+                if not infiles: continue
+                bandfiles.setdefault(band, list()).append(outf)
+                future = exec.submit(mkmbtiles, infiles, outf, lconf['type'], layer, BAND2ZOOM[band][1])
+                process_files[future] = outf
     for future in concurrent.futures.as_completed(process_files):
         try:
             future.result()
         except Exception as e:
             LOG.error(e)
             pass
-    # build mbtiles
+
+    # merge tiles
     with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as exec:
         process_files = dict()
-        for out_stem in outfiles:
-            infiles = list()
-            for file in out_dir.iterdir():
-                if file.is_file() and file.suffix == '.geojson' and file.stem.startswith(out_stem):
-                    infiles.append(file)
-            outf = Path(out_dir, out_stem + '.mbtiles')
-            future = exec.submit(mkmbtiles, infiles, outf, None)
+        for band, infiles in bandfiles.items():
+            outf = Path(out_dir, f'BAND{band}.mbtiles')
+            future = exec.submit(mergetiles, infiles, outf)
             process_files[future] = outf
+            
     for future in concurrent.futures.as_completed(process_files):
         try:
             future.result()
@@ -203,44 +241,49 @@ def process_dbs(work_dir: Path, jobs=1):
 
     return process_files
 
-def process_db(infile: Path, outfile: Path, layer: str):
-
-    LOG.debug(f'{infile} -> {outfile}')
-    proc = subprocess.run([
-        'ogr2ogr',
-        '-f',
-        'geojson',
-        outfile,
-        infile,
-        layer
-    ], 
-    capture_output = True)
-
-    if proc.returncode != 0:
-        emsg = proc.stderr.decode()
-        msg = f'Failed to generated DB. {emsg}'
-        LOG.error(msg)
-
-def mkmbtiles(infiles: List[Path], outfile: Path, dtype: DataType):
+def mkmbtiles(infiles: List[Path], outfile: Path, dtype: DataType, layer: str, z: int = 18):
 
     LOG.debug(f'{[ f.stem for f in infiles]} -> {outfile}')
-    band = int(outfile.stem[2])
-    zoom = BAND2ZOOM[band]
+    if dtype == DataType.Point:
+        args = ['-r1', '--cluster-distance=10', '--accumulate-attribute=DEPTH:mean', '-yDEPTH']
+    else:
+        args = ['--coalesce-densest-as-needed', '--extend-zooms-if-still-dropping', '-yVALDCO', '-yOBJNAM']
+
     proc = subprocess.run([
         'tippecanoe',
-        '-zg',
-        '--coalesce-densest-as-needed',
-        '--extend-zooms-if-still-dropping',
+        *args,
+        '-l',
+        layer,
+        f'-z{z}',
         '-fo',
         outfile,
         *infiles,
-    ], 
-    capture_output = True)
+    ],
+        capture_output=True)
 
     if proc.returncode != 0:
         emsg = proc.stderr.decode()
-        msg = f'Failed to generated mbtiles. {emsg}'
+        msg = f'Failed to generate mbtiles. {emsg}'
         LOG.error(msg)
+
+def mergetiles(infiles: List[Path], outfile: Path):
+
+    LOG.debug(f'{[ f.stem for f in infiles]} -> {outfile}')
+
+    proc = subprocess.run([
+        'tile-join',
+        '-fo',
+        outfile,
+        *infiles,
+    ],
+        capture_output=True)
+
+    if proc.returncode != 0:
+        emsg = proc.stderr.decode()
+        msg = f'Failed to merge mbtiles. {emsg}'
+        LOG.error(msg)
+    
+    for f in infiles: f.unlink()
 
 
 if __name__ == '__main__':
@@ -261,6 +304,11 @@ if __name__ == '__main__':
                         help='Download ENCs from NOAA. If not should be in ${WORK_DIR}/ENC_ROOT')
     parser.add_argument('--db', action='store_true',
                         help='Generate intermediate db representation')
+    parser.add_argument('--tile', action='store_true',
+                        help='Generate mbtiles')
+    parser.add_argument('--bb', nargs=4, type=float,
+                        default=(-180.0, 180.0, -90.0, 90.0),
+                        help='Bounding box for map min_lon max_lon min_lat, max_lat')
 
     args = parser.parse_args()
 
@@ -272,10 +320,11 @@ if __name__ == '__main__':
         get_enc(args.work_dir)
 
     encdir = Path(args.work_dir, 'ENC_ROOT')
-    if not encdir.is_dir:
+    if not encdir.is_dir():
         log.error('ENC_ROOT does not exist. Should you use --get to download?')
 
     if args.db:
-        make_dbs(args.work_dir, args.jobs)
+        make_dbs(args.work_dir, args.bb, args.jobs)
 
-    process_dbs(args.work_dir, jobs=args.jobs)
+    if args.tile:
+        process_dbs(args.work_dir, jobs=args.jobs)
