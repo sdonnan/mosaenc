@@ -188,7 +188,7 @@
       "source": "BAND5",
       "source-layer": "LNDARE",
       "paint": {
-	  "fill-color": "rgba(255, 248, 195, 1)",
+	        "fill-color": "rgba(255, 248, 195, 1)",
           "fill-outline-color": "rgba(107, 88, 0, 1)"
       }
     },

@@ -1,3 +1,4 @@
 */ENC_ROOT/*
 *.geojson
 *.mbtiles
+*/build/*

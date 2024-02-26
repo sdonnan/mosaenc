@@ -1,0 +1,88 @@
+{
+  "version": 8,
+  "name": "Day",
+  "metadata": {
+    "maputnik:license": "https://github.com/maputnik/osm-liberty/blob/gh-pages/LICENSE.md",
+    "maputnik:renderer": "mlgljs",
+    "openmaptiles:version": "3.x"
+  },
+  "sources": {},
+  "sprite": "https://maputnik.github.io/osm-liberty/sprites/osm-liberty",
+  "glyphs": "https://orangemug.github.io/font-glyphs/glyphs/{fontstack}/{range}.pbf",
+  "layers": [
+    {
+      "id": "back",
+      "type": "background",
+      "paint": {"background-color": "rgba(188, 203, 255, 1)"}
+    },
+    {
+      "id": "landarea",
+      "type": "fill",
+      "source-layer": "LNDARE",
+      "paint": {
+          "fill-color": "rgba(255, 248, 195, 1)",
+          "fill-outline-color": "rgba(107, 88, 0, 1)"
+      }
+    },
+    {
+      "id": "depthcont",
+      "type": "line",
+      "source-layer": "DEPCNT",
+      "filter": ["all"],
+      "layout": {"visibility": "visible"},
+      "paint": {"line-color": "rgba(131, 141, 192, 1)"}
+    },
+    {
+      "id": "soundings",
+      "type": "symbol",
+      "source-layer": "SOUNDG",
+      "filter": ["all", ["==", "$type", "Point"]],
+      "layout": {
+        "text-field": [
+          "number-format",
+          ["get", "DEPTH"],
+          {"min-fraction-digits": 1, "max-fraction-digits": 1}
+        ],
+        "text-allow-overlap": false,
+        "text-font": ["Roboto Condensed Regular"],
+        "visibility": "visible",
+        "text-optional": false
+      },
+      "paint": {"text-opacity": 0.8}
+    },
+    {
+      "id": "depthcont-text",
+      "type": "symbol",
+      "source-layer": "DEPCNT",
+      "layout": {
+        "symbol-placement": "line-center",
+        "text-field": [
+          "number-format",
+          ["get", "VALDCO"],
+          {"min-fraction-digits": 1, "max-fraction-digits": 1}
+        ],
+        "text-font": ["Roboto Condensed Regular"]
+      },
+      "paint": {
+        "text-halo-color": "rgba(255, 255, 255, 1)",
+        "text-halo-width": 2,
+        "text-halo-blur": 0.5
+      }
+    },
+    {
+      "id": "landarea-text",
+      "type": "symbol",
+      "source-layer": "LNDARE",
+      "layout": {
+        "symbol-placement": "point",
+        "text-field": ["get", "OBJNAM"],
+        "text-font": ["Roboto Condensed Regular"],
+        "text-pitch-alignment": "auto",
+        "symbol-avoid-edges": false,
+        "symbol-z-order": "auto"
+      },
+      "paint": {"text-halo-width": 0, "text-opacity": 0.5}
+    }
+  ],
+  "id": "Day"
+}
