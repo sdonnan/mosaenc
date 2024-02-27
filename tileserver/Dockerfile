@@ -42,4 +42,4 @@ run curl -LJo /tileserver-src.zip https://github.com/maptiler/tileserver-gl/arch
     && npm install
 
 workdir /data
-cmd xvfb-run --server-args="-screen 0 1024x768x24" node /tileserver-gl-4.10.2
+entrypoint ["xvfb-run" "--server-args='-screen 0 1024x768x24'" "node" "/tileserver-gl-4.10.2"]

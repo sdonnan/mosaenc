@@ -318,10 +318,10 @@ def make_tile_config(work_dir: Path):
     data = [p for p in out_dir.iterdir() if p.suffix == '.mbtiles']
     data.sort()
     bands = [int(f.stem[-1]) for f in data]
-    styles = [p for p in Path('styles').iterdir() if p.suffix == '.json']
+    styles = [p for p in Path('templates', 'styles').iterdir() if p.suffix == '.json']
 
     # generate config
-    cfg = json.load(Path('config_template.json').open('r'))
+    cfg = json.load(Path('templates', 'config.json').open('r'))
     cfg['data'].update({f.stem: {'mbtiles': f.name} for f in data})
     cfg['styles'].update(
         {f.stem: {'style': f.name, 'serve_data': True} for f in styles})
@@ -370,7 +370,7 @@ if __name__ == '__main__':
 
     parser = ArgumentParser(
         'Process ENCs into mbtiles file using GDAL and Tippecanoe')
-    parser.add_argument('-d', '--work-dir', type=Path, default=Path.cwd(),
+    parser.add_argument('-d', '--work-dir', type=Path, default=Path(Path.cwd(), 'build'),
                         help='Working directory for script if not the current directory')
     parser.add_argument('-v', '--verbose',
                         action='store_true', help='Debug output')

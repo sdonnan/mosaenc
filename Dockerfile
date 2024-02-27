@@ -37,3 +37,8 @@ run curl -LJo /tippecanoe.zip https://github.com/mapbox/tippecanoe/archive/refs/
     && cd .. \
     && rm -r tippecanoe-master \
     && rm /tippecanoe.zip
+
+workdir /
+add mosaenc.py /
+add templates /templates
+entrypoint ["python3", "/mosaenc.py"]
