@@ -22,16 +22,17 @@ run curl -LJo /gdal.tar.gz https://github.com/OSGeo/gdal/releases/download/v3.8.
     && mkdir build \
     && cd build \
     && cmake -DCMAKE_BUILD_TYPE=Release .. \
-    && make install -j \
-    && cd \
-    && rm gdal-3.8.4 \
+    && make install -j `nproc` \
+    && ldconfig \
+    && cd ../.. \
+    && rm -r gdal-3.8.4 \
     && rm /gdal.tar.gz
 
 # install tippecanoe
 run curl -LJo /tippecanoe.zip https://github.com/mapbox/tippecanoe/archive/refs/heads/master.zip \
     && unzip /tippecanoe.zip \
     && cd tippecanoe-master \
-    && make -j \
+    && make -j `nproc` \
     && make install \
     && cd .. \
     && rm -r tippecanoe-master \

@@ -30,12 +30,16 @@ run apt update \
 run curl -o /node.tar.xz https://nodejs.org/dist/v20.11.1/node-v20.11.1-linux-x64.tar.xz \
     && mkdir -p /usr/local/lib/nodejs \
     && tar -xJvf /node.tar.xz -C /usr/local/lib/nodejs \
-    && echo 'export PATH=/usr/local/lib/nodejs/node-v20.11.1-linux-x64/bin:${PATH}' >> ${HOME}/.profile \
     && rm /node.tar.xz
 
+env PATH="/usr/local/lib/nodejs/node-v20.11.1-linux-x64/bin:$PATH"
+
+# build tileserver-gl
 run curl -LJo /tileserver-src.zip https://github.com/maptiler/tileserver-gl/archive/refs/tags/v4.10.2.zip \
     && unzip /tileserver-src.zip \
     && rm /tileserver-src.zip \
     && cd tileserver-gl-4.10.2 \
-    && . ${HOME}/.profile \
     && npm install
+
+workdir /data
+cmd xvfb-run --server-args="-screen 0 1024x768x24" node /tileserver-gl-4.10.2

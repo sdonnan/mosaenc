@@ -59,7 +59,7 @@ class Enc:
 
     def __init__(self, fname: Path):
         self.fname: Path = fname
-        self.band: int(fname.stem[2])
+        self.band: int = int(fname.stem[2])
         self.bb = None
         drv = ogr.GetDriverByName('S57')
         try:
